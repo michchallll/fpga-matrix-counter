@@ -1,0 +1,41 @@
+# Vivado generated files
+.Xil/
+*.jou
+*.log
+*.str
+*.wdb
+*.vcd
+*.pb
+*.rpt
+*.dcp
+*.bit
+*.ltx
+*.mmi
+*.mcs
+*.prm
+
+# Vivado project generated folders
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+*.gen/
+
+# Backup files
+*.bak
+*.orig
+*~
+.DS_Store
+Thumbs.db
+
+# LaTeX generated files
+*.aux
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.synctex.gz
+*.toc

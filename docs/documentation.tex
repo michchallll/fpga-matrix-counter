@@ -1,0 +1,304 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[czech]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[
+    textwidth=165mm,
+    textheight=245mm,
+    centering
+]{geometry}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    columns=fullflexible
+}
+
+\title{IVH -- Projekt \\ Čítač na maticovém displeji}
+\author{Michael Kubát (x225695)}
+\date{2026}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    {\Huge \textsc{Vysoké učení technické v Brně}} \\
+    \vspace{0.5em}
+    {\huge \textsc{Fakulta informačních technologií}} \\
+    \vspace{\stretch{0.35}}
+    {\huge IVH -- Projekt} \\
+    \vspace{0.8em}
+    {\Huge Čítač na maticovém displeji} \\
+    \vspace{1.5em}
+    {\Large FPGA / Zynq / VHDL} \\
+    \vspace{\stretch{0.65}}
+    {\Large 2026 \hfill Michael Kubát (x225695)}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{Úvod}
+
+Cílem projektu bylo navrhnout a implementovat čítač zobrazovaný na maticovém displeji 8x8. Návrh je určen pro FPGA desku se Zynq systémem. Projekt je vytvořen ve VHDL a propojen ve Vivadu pomocí blokového návrhu, který obsahuje hodinový generátor a hlavní komponentu \texttt{top}.
+
+Výsledná aplikace postupně zobrazuje číselnou sekvenci, poté přechází do zobrazení obrázku a vlastní animace. Po dokončení celé sekvence se systém vrací zpět na začátek. Zobrazování na displeji je řešeno multiplexováním sloupců.
+
+\section{Požadované chování systému}
+
+Systém pracuje podle následující posloupnosti:
+
+\begin{itemize}
+    \item čítání od 00 do 10 s krokem 1 sekunda,
+    \item čítání od 10 do 99 s krokem 100 ms,
+    \item inverzní odpočet 90, 80, ..., 00 s krokem 500 ms,
+    \item zobrazení obrázku srdce po dobu 5 sekund,
+    \item dvě rotace obrázku doleva,
+    \item vlastní animace tvořená zaplněním displeje, blikáním a spirálovým zhasínáním,
+    \item návrat na začátek sekvence.
+\end{itemize}
+
+\section{Blokový návrh systému}
+
+Na nejvyšší úrovni je návrh tvořen blokovým designem ve Vivadu. Vstupní hodinový signál \texttt{sysclk} je přiveden do komponenty Clocking Wizard, která generuje hodinový signál 25 MHz pro hlavní VHDL entitu \texttt{top}. Z entity \texttt{top} jsou vyvedeny výstupy \texttt{row[7:0]} a \texttt{col[7:0]} pro řízení maticového displeje.
+
+\begin{figure}[H]
+    \centering
+    % Sem vlozit screenshot blokoveho designu z Vivada.
+    \includegraphics[width=0.85\textwidth]{Blokovy_navrh.png}
+    \caption{Blokový návrh ve Vivadu: Clocking Wizard a hlavní entita top.}
+    \label{fig:block_design}
+\end{figure}
+
+Vnitřní architektura entity \texttt{top} je znázorněna na obrázku~\ref{fig:architecture}. Návrh se skládá z časovačů, FSM řadiče, dvojice BCD čítačů, dvou ROM pamětí pro převod číslic na sedmisegmentový kód, generátoru bitmapy, 64 buněk \texttt{cell} a zobrazovací části pro multiplexování displeje.
+
+\begin{figure}[H]
+    \centering
+    % Sem vlozit vlastni blokove schema architektury.
+    \includegraphics[width=0.95\textwidth]{architektura.png}
+    \caption{Vnitřní architektura systému.}
+    \label{fig:architecture}
+\end{figure}
+
+\section{Popis architektury}
+
+\subsection{Hlavní FSM řadič}
+
+Chování systému je řízeno konečným automatem. V návrhu jsou použity tyto stavy:
+
+\begin{lstlisting}
+S_START_RESET
+S_UP_SLOW
+S_UP_FAST
+S_DOWN_INV
+S_IMAGE
+S_ROTATE
+S_FILL
+S_BLINK
+S_SPIRAL
+\end{lstlisting}
+
+Stav \texttt{S\_START\_RESET} slouží ke krátkému počátečnímu resetu BCD čítačů. Ve stavu \texttt{S\_UP\_SLOW} probíhá pomalé čítání od 00 do 10. Ve stavu \texttt{S\_UP\_FAST} systém pokračuje rychlým čítáním do 99. Po dosažení hodnoty 99 následuje stav \texttt{S\_DOWN\_INV}, kde se zobrazuje inverzní odpočet po desítkách. Poté následuje zobrazení obrázku, jeho rotace a vlastní animace.
+
+\subsection{BCD čítače}
+
+Pro čítání jsou použity dvě instance komponenty \texttt{counter}. První instance reprezentuje jednotky a druhá desítky. Čítače mají vstupy pro reset, směr čítání a povolení čítání. Směr čítání je řízen signálem \texttt{dir\_cnt}. V normálních stavech systém čítá nahoru, při inverzním odpočtu čítá dolů.
+
+Jednotky jsou v inverzním odpočtu zobrazeny jako nula, aby vznikla posloupnost:
+
+\begin{center}
+90, 80, 70, ..., 00
+\end{center}
+
+\subsection{ROM paměť pro sedmisegmentový kód}
+
+Pro převod BCD číslice na sedmisegmentový kód je použita komponenta \texttt{seg\_rom}. Tato ROM paměť převádí hodnoty 0 až 9 na vektor segmentů \texttt{a} až \texttt{g}. V návrhu jsou použity dvě instance, jedna pro desítky a jedna pro jednotky.
+
+Výstup ROM má tvar:
+
+\begin{center}
+\texttt{seg(6 downto 0) = a b c d e f g}
+\end{center}
+
+Hodnota 1 znamená, že daný segment má svítit.
+
+\subsection{Generování 8x8 bitmapy}
+
+Výstupy ROM jsou převedeny na 64bitovou bitmapu \texttt{base\_matrix}. Bitmapa reprezentuje displej 8x8 a je uložena po řádcích. Hodnota 1 znamená, že daná LED má svítit.
+
+Číslice jsou vykresleny pomocí pomocných procedur \texttt{set\_pixel}, \texttt{hline}, \texttt{vline} a \texttt{draw\_digit}. Kvůli fyzické orientaci displeje jsou při vykreslování prohozeny horní a dolní segmenty.
+
+\subsection{Buňky cell}
+
+Výsledný obraz není posílán přímo do zobrazovače, ale nejprve prochází přes 64 instancí entity \texttt{cell}. Tyto instance jsou vytvořeny pomocí konstrukce \texttt{for-generate}. Každá buňka vybírá, jaký zdroj obrazu bude použit.
+
+\newpage
+
+\noindent Použité režimy buněk jsou:
+
+\begin{center}
+\begin{tabular}{|c|l|}
+\hline
+Režim & Význam \\
+\hline
+\texttt{000} & BCD obraz \\
+\texttt{001} & BCD obraz pro inverzní odpočet \\
+\texttt{010} & statický obrázek nebo rotace \\
+\texttt{100} & vlastní animace \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Multiplexování displeje}
+
+Maticový displej je řízen multiplexováním sloupců. Vždy je aktivní právě jeden sloupec. Sloupce jsou aktivní v logické 1 a řádky jsou aktivní v logické 0. Z tohoto důvodu je výstup \texttt{row} negací interní bitmapy.
+
+Jeden sloupec je aktivní přibližně 2 ms. Po průchodu všech osmi sloupců je do zobrazovače vložen nový stabilní snímek \texttt{shown\_matrix}. Tím se omezuje problikávání při změně zobrazovaného obrazu.
+
+\section{Použité konstanty}
+
+V návrhu je použit generický parametr:
+
+\begin{lstlisting}
+CLK_HZ : integer := 25_000_000
+\end{lstlisting}
+
+Ten určuje frekvenci hodinového signálu. Ve skutečné implementaci je hodnota 25 MHz. V simulacích byla tato hodnota zmenšena, aby bylo možné rychleji ověřit chování systému.
+
+\begin{center}
+\begin{tabular}{|l|l|l|}
+\hline
+Konstanta & Hodnota & Význam \\
+\hline
+\texttt{TICK\_1S\_MAX} & \texttt{CLK\_HZ - 1} & časový pulz 1 s \\
+\texttt{TICK\_100MS\_MAX} & \texttt{CLK\_HZ / 10 - 1} & časový pulz 100 ms \\
+\texttt{TICK\_500MS\_MAX} & \texttt{CLK\_HZ / 2 - 1} & časový pulz 500 ms \\
+\texttt{SCAN\_MAX} & \texttt{CLK\_HZ / 500 - 1} & 2 ms na jeden sloupec \\
+\texttt{IMAGE\_5S\_MAX} & \texttt{5 * CLK\_HZ - 1} & zobrazení obrázku 5 s \\
+\texttt{ROTATE\_STEP\_MAX} & \texttt{CLK\_HZ / 4 - 1} & krok rotace 250 ms \\
+\texttt{FILL\_STEP\_MAX} & \texttt{CLK\_HZ / 16 - 1} & rychlost zaplnění \\
+\texttt{BLINK\_STEP\_MAX} & \texttt{CLK\_HZ / 4 - 1} & rychlost blikání \\
+\texttt{SPIRAL\_STEP\_MAX} & \texttt{CLK\_HZ / 32 - 1} & rychlost spirály \\
+\hline
+\end{tabular}
+\end{center}
+
+Použití konstant umožňuje snadno měnit časování celého systému a zároveň zrychlit simulace pomocí menší hodnoty \texttt{CLK\_HZ}.
+
+\section{Simulace}
+
+\subsection{Simulace zobrazování a multiplexu}
+
+Tato simulace ověřuje správnou funkci multiplexování maticového displeje. Ve waveformu jsou sledovány zejména signály \texttt{col\_idx}, \texttt{col}, \texttt{row}, \texttt{shown\_matrix} a pomocný signál \texttt{debug\_leds}.
+
+Signál \texttt{col\_idx} postupně prochází hodnoty 0 až 7. Podle něj je aktivní právě jeden bit výstupu \texttt{col}. Signál \texttt{debug\_leds} ukazuje neinvertovaná data aktuálního sloupce. Výstup \texttt{row} je jejich negací, protože řádky displeje jsou aktivní v logické 0.
+
+\begin{figure}[H]
+    \centering
+    % Sem vlozit screenshot simulace multiplexu.
+    \includegraphics[width=0.95\textwidth]{ciselny_prechod.png}
+    \caption{Simulace zobrazování a multiplexování displeje.}
+    \label{fig:sim_multiplex}
+\end{figure}
+
+\subsection{Simulace FSM řadiče}
+
+Simulace FSM řadiče ověřuje průchod všemi hlavními stavy aplikace. Ve waveformu jsou sledovány zejména signály \texttt{phase}, \texttt{digit\_tens}, \texttt{digit\_ones}, \texttt{tick\_1s}, \texttt{tick\_100ms}, \texttt{tick\_500ms}, \texttt{cell\_mode} a \texttt{cell\_invert}.
+
+\begin{figure}[H]
+    \centering
+    % Sem vlozit screenshot simulace FSM.
+    \includegraphics[width=0.95\textwidth]{prechod_stavu.png}
+    \caption{Simulace FSM řadiče.}
+    \label{fig:sim_fsm}
+\end{figure}
+
+Ve stavu \texttt{S\_UP\_SLOW} jsou čítače povolovány pulzem \texttt{tick\_1s}. Po dosažení hodnoty 10 přechází systém do stavu \texttt{S\_UP\_FAST}, kde se používá rychlejší pulz \texttt{tick\_100ms}. Po dosažení hodnoty 99 následuje inverzní odpočet ve stavu \texttt{S\_DOWN\_INV}. V tomto stavu je aktivní signál \texttt{cell\_invert}. Následně systém přechází do stavů pro obrázek, rotaci a animace. FSM řadič tedy odpovídá požadovanému chování.
+
+\subsection{Simulace ROM paměti}
+
+Simulace ROM paměti byla provedena pomocí testbenche \texttt{seg\_rom\_tb}. Testbench postupně nastavuje vstup \texttt{digit} na hodnoty 0 až 9 a pomocí příkazů \texttt{assert} kontroluje, zda výstup \texttt{seg} odpovídá očekávanému sedmisegmentovému kódu. Dále jsou ověřeny neplatné hodnoty 10 a 15, pro které ROM vrací nulový výstup.
+
+\begin{figure}[H]
+    \centering
+    % Sem vlozit screenshot simulace ROM.
+    \includegraphics[width=0.95\textwidth]{ROM_pamet.png}
+    \caption{Simulace ROM paměti seg\_rom.}
+    \label{fig:sim_rom}
+\end{figure}
+
+Simulace proběhla bez chybových hlášení \texttt{assert}. To potvrzuje, že ROM paměť správně převádí BCD číslice na sedmisegmentový kód.
+
+\subsection{Simulace celého systému}
+
+Simulace celého systému byla provedena nad entitou \texttt{top}. Pro účely simulace byla snížena hodnota generického parametru \texttt{CLK\_HZ}, aby bylo možné projít větší část chování systému v rozumném čase.
+
+Ve waveformu byly sledovány signály \texttt{phase}, \texttt{digit\_tens}, \texttt{digit\_ones}, \texttt{disp\_tens}, \texttt{disp\_ones}, \texttt{seg\_tens}, \texttt{seg\_ones}, \texttt{cell\_mode}, \texttt{cell\_invert}, \texttt{shown\_matrix}, \texttt{row} a \texttt{col}.
+
+\begin{figure}[H]
+    \centering
+    % Sem vlozit prvni screenshot celeho systemu.
+    \includegraphics[width=0.95\textwidth]{prechod.png}
+    \caption{Simulace celého systému -- přechod mezi zobrazením srdce a vlastní animací.}
+    \label{fig:sim_system_1}
+\end{figure}
+
+Na prvním průběhu je zachycen přechod mezi stavem \texttt{S\_IMAGE}, ve kterém je po dobu
+5 sekund zobrazen obrázek srdce, a následujícím animačním stavem. Ve waveformu je tedy
+vidět změna zobrazovaných dat z obrazového vstupu na data odpovídající animaci. Současně
+lze pozorovat průběhy signálů \texttt{row} a \texttt{debug\_leds}. Signál
+\texttt{debug\_leds} je vhodný zejména pro simulaci, protože přehledně ukazuje, které LED
+mají v daném okamžiku logicky svítit v aktuálně zobrazovaném sloupci. Oproti tomu signál
+\texttt{row} již obsahuje fyzické buzení displeje, tedy invertovanou podobu dat
+(protože na maticovém displeji platí, že logická 0 znamená rozsvícení LED). Porovnání
+obou průběhů proto usnadňuje kontrolu správné funkce multiplexování i ověření, že je
+výstup na displej generován správně.
+
+\begin{figure}[H]
+    \centering
+    % Sem vlozit druhy screenshot celeho systemu.
+    \includegraphics[width=0.95\textwidth]{nova_iterace.png}
+    \caption{Simulace celého systému -- konec sekvence a začátek nové iterace.}
+    \label{fig:sim_system_2}
+\end{figure}
+
+Na druhém průběhu je zachycen konec celé zobrazovací sekvence a začátek nové iterace. 
+Ve waveformu je vidět dokončení stavu \texttt{S\_SPIRAL}, ve kterém probíhá spirálové 
+zhasínání displeje. Po dosažení poslední pozice animace se aktivuje reset čítačů a FSM 
+přechází zpět do stavu \texttt{S\_UP\_SLOW}. Tím začíná nová iterace programu, ve které 
+se znovu spouští čítání od hodnoty 00. Simulace potvrzuje, že systém po dokončení 
+animace nezůstane stát, ale správně se vrací na začátek požadované smyčky.
+
+\section{Implementace na kitu Xilinx Zynq }
+
+Po syntéze, implementaci a nahrání bitstreamu na kit Xilinx Zynq byla ověřena funkce maticového displeje. Displej zobrazuje nejprve číselnou sekvenci, poté inverzní odpočet, obrázek srdce a vlastní animaci. Zobrazování je stabilní a multiplexování sloupců probíhá správně.
+
+\section{Funkční implementace}
+
+Video s ukázkou funkční implementace je dostupné na následujícím odkazu:
+
+\begin{center}
+    \href{https://drive.google.com/file/d/17tBV3SdgTNu4UnVacjBxkQPx3mVv7dnv/view?usp=drive_link}{\underline{Odkaz na video s funkční implementací}}
+\end{center}
+
+Před odevzdáním byl odkaz ověřen v anonymním okně prohlížeče, aby bylo zajištěno, že je video dostupné i bez přihlášení.
+
+\section{Závěr}
+
+V projektu byl vytvořen systém pro řízení maticového displeje 8x8. Návrh obsahuje FSM řadič, dvojici BCD čítačů, ROM paměť pro převod číslic, generování bitmapy, 64 instancí buněk \texttt{cell} a~zobrazovací multiplex. Systém splňuje požadovanou posloupnost čítání, inverzního odpočtu, zobrazení obrázku a animace.
+
+\end{document}
