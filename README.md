@@ -90,7 +90,8 @@ The implemented sequence is:
 │   └── img/
 ├── README.md
 └── LICENSE
+```
 
 ## Example Simulation
 
-![System simulation](docs/img/sim_system_1.png)
+![System simulation](docs/img/sim_fsm.png)
